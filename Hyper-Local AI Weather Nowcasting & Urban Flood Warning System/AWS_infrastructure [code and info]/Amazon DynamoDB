@@ -1,0 +1,4 @@
+* **Table Name:** `WeatherTelemetry`
+* **Partition Key:** `node_id` (String) - Master Grid
+* **Sort Key:** `timestamp` (String) - ISO 8601 Format
+* **Feature Count:** 36 Variables (Spatiotemporal meteorological data across 5 nodes)

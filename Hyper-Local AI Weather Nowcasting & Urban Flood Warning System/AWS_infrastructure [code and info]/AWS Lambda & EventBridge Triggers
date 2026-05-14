@@ -1,0 +1,13 @@
+* **Flood_Data_Ingestion**
+  * **Trigger:** Amazon EventBridge (`Hourly-Weather-Sync-Rule`)
+  * **Cron Schedule:** `cron(0 * * * ? *)` (Run at minute 0 of every hour)
+
+* **FloodPredictionFunction**
+  * **Container Image URI:** `980872845129.dkr.ecr.us-east-1.amazonaws.com/flood-model-repo`
+  * **Trigger 1 (API):** API Gateway (`FloodPredictionFunction-API`)
+  * **Trigger 2 (Schedule):** Amazon EventBridge (`Trigger-Flood-Prediction`)
+  * **Cron Schedule:** `cron(5 * * * ? *)` (Run at minute 5 of every hour)
+  
+* **monitoring_lambda**
+  * **Trigger:** Amazon EventBridge (`Daily-Flood-Monitor-Rule`)
+  * **Cron Schedule:** `cron(0 1 * * ? *)` (Run every day at 01:00 AM)

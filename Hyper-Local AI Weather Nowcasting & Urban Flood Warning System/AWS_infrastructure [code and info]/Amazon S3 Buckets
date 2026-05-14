@@ -1,0 +1,3 @@
+* **Frontend Web Hosting:** `flood-alert-dashboard-st125894` (URL: http://flood-alert-dashboard-st125894.s3-website-us-east-1.amazonaws.com)
+* **Model Artifact Registry:** `flood-alert-model-st125894` (Key: xgboost_rain_model.pkl)
+* **Raw Data Lake:** `flood-storage-st125894` (Path: raw_data/YYYY/MM/DD/)

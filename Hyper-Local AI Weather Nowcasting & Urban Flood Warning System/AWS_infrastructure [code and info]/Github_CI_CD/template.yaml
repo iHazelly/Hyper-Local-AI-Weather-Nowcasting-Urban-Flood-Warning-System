@@ -1,0 +1,145 @@
+# ==========================================
+  # FOR IaC and upload into CloudFormation
+# ==========================================
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Full Serverless MLOps Infrastructure - Pathum Thani Flood Alert System
+
+Resources:
+  # ==========================================
+  # 1. STORAGE & DATABASES
+  # ==========================================
+  WeatherTelemetryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: WeatherTelemetry
+      AttributeDefinitions:
+        - AttributeName: node_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: node_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+
+  RawDataLakeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: flood-storage-st125894
+      
+  ModelRegistryBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: flood-alert-model-st125894
+
+  DashboardHostingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: flood-alert-dashboard-st125894
+      WebsiteConfiguration:
+        IndexDocument: index.html
+
+  # ==========================================
+  # 2. IAM ROLES (Permissions)
+  # ==========================================
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+
+  # ==========================================
+  # 3. LAMBDA FUNCTIONS (Compute)
+  # ==========================================
+  DataIngestionLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: Flood_Data_Ingestion
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 60
+      Code:
+        S3Bucket: flood-alert-model-st125894 # Placeholder for zip
+        S3Key: deployments/ingestion.zip
+
+  FloodPredictionLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: FloodPredictionFunction
+      PackageType: Image
+      Code:
+        ImageUri: 980872845129.dkr.ecr.us-east-1.amazonaws.com/flood-model-repo:latest
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 120
+      MemorySize: 1024
+
+  ModelMonitoringLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: monitoring_lambda
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.9
+      Timeout: 300
+      Code:
+        S3Bucket: flood-alert-model-st125894 # Placeholder for zip
+        S3Key: deployments/monitoring.zip
+
+  # ==========================================
+  # 4. API GATEWAY (Frontend Trigger)
+  # ==========================================
+  PredictionApiGateway:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: FloodPredictionFunction-API
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins:
+          - "*"
+        AllowMethods:
+          - GET
+          - OPTIONS
+
+  # ==========================================
+  # 5. EVENTBRIDGE RULES (Cron Triggers)
+  # ==========================================
+  IngestionRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: Hourly-Weather-Sync-Rule
+      ScheduleExpression: cron(0 * * * ? *)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt DataIngestionLambda.Arn
+          Id: TargetFunctionV1
+
+  PredictionRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: Trigger-Flood-Prediction
+      ScheduleExpression: cron(5 * * * ? *)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt FloodPredictionLambda.Arn
+          Id: TargetFunctionV2
+
+  MonitoringRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: Daily-Flood-Monitor-Rule
+      ScheduleExpression: cron(0 1 * * ? *)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt ModelMonitoringLambda.Arn
+          Id: TargetFunctionV3

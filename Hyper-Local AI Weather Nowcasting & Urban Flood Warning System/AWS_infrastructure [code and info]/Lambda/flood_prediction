@@ -1,0 +1,151 @@
+# Put this code into Github (CI/CD) automatically update into AWS ECR
+import json
+import boto3
+import pickle
+import pandas as pd
+import numpy as np
+import urllib.request
+from datetime import datetime, timedelta, timezone
+from boto3.dynamodb.conditions import Key
+
+S3_BUCKET = 'flood-alert-model-st125894'
+MODEL_KEY = 'xgboost_rain_model.pkl'
+DYNAMODB_TABLE = 'WeatherTelemetry'
+LINE_TOKEN = '<your-line-token-api>'
+
+s3_client = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table(DYNAMODB_TABLE)
+
+def load_prediction_model():
+    response = s3_client.get_object(Bucket=S3_BUCKET, Key=MODEL_KEY)
+    return pickle.loads(response['Body'].read())
+
+def fetch_latest_master_grid():
+    response = table.query(
+        KeyConditionExpression=Key('node_id').eq('master_grid'),
+        ScanIndexForward=False, Limit=1
+    )
+    items = response.get('Items', [])
+    return items[0] if len(items) > 0 else {}
+
+def parse_float_safe(val, default_val=0.0):
+    try:
+        return float(val) if val not in ['MISSING', None, 'None'] else default_val
+    except:
+        return default_val
+
+def calculate_cumulative_rain(target_node_suffix, hours_back):
+    try:
+        tz_bkk = timezone(timedelta(hours=7))
+        time_threshold = (datetime.now(tz_bkk) - timedelta(hours=hours_back)).strftime('%Y-%m-%dT%H:%M:%S')
+        response = table.query(
+            KeyConditionExpression=Key('node_id').eq('master_grid') & Key('timestamp').gte(time_threshold)
+        )
+        return sum([parse_float_safe(item.get(f'rain_{target_node_suffix}', 0)) for item in response.get('Items', [])])
+    except:
+        return 0.0
+
+def get_rain_intensity_label(rain_mm):
+    if rain_mm <= 0.4: return "ไม่มีฝน"
+    elif rain_mm < 2.0: return "ฝนเล็กน้อย"
+    elif rain_mm < 6.0: return "ฝนปรอยๆ"
+    elif rain_mm < 10.0:return "ฝนปานกลาง"
+    else: return "ฝนตกหนัก"
+
+def lambda_handler(event, context):
+    cors_headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        model = load_prediction_model()
+        raw_data = fetch_latest_master_grid()
+        
+        if not raw_data:
+            return {"statusCode": 404, "headers": cors_headers, "body": json.dumps({"status": "error", "message": "No data"})}
+
+        feature_dict = {col: parse_float_safe(val) for col, val in raw_data.items() if col not in ['node_id', 'timestamp']}
+        df_input = pd.DataFrame([feature_dict])
+        features = df_input.reindex(columns=model.feature_names_in_, fill_value=0) if hasattr(model, 'feature_names_in_') else df_input
+        
+        preds = model.predict(features)
+        if len(preds.shape) > 1:
+            r1, r3, r6 = float(preds[0][0]), float(preds[0][1]), float(preds[0][2])
+        else:
+            r1, r3, r6 = float(preds[0]), float(preds[1]), float(preds[2])
+
+        rain_1h = 0.0 if r1 <= 0.4 else r1
+        rain_3h = 0.0 if r3 <= 0.4 else r3
+        rain_6h = 0.0 if r6 <= 0.4 else r6
+
+        soil_pathum = parse_float_safe(raw_data.get('soil_moisture'), 0.30)
+        rain_3h_accum = calculate_cumulative_rain('pathum', 3) + rain_1h
+        rain_12h_accum = calculate_cumulative_rain('pathum', 12) + rain_1h
+
+        alert_triggered = False
+        alert_message = ""
+
+        if rain_1h >= 10.0:
+            alert_message = f"🔴 [TIER 1] คาดการณ์ฝนหนักมาก ({rain_1h:.1f} mm/hr)อพยพด่วน!"
+            alert_triggered = True
+        elif rain_12h_accum > 20.0 and soil_pathum >= 0.48:
+            alert_message = f"🔴 [TIER 4] ฝนสะสม 12 ชม. สูงร่วมกับดินอิ่มตัว อพยพด่วน!"
+            alert_triggered = True
+        elif rain_1h > 6.0 and soil_pathum >= 0.50:
+            alert_message = f"🔴 [TIER 2] ดินอิ่มตัวสูงสุด ระวังน้ำหลาก!"
+            alert_triggered = True
+        elif rain_3h_accum > 15.0:
+            alert_message = f"🔴 [TIER 3] ฝนสะสม 3 ชม. เกินขีดจำกัด อพยพด่วน!"
+            alert_triggered = True
+        elif rain_3h_accum >= 10.0:
+            alert_message = f"🟠 [TIER 3] ฝนตกต่อเนื่อง เตรียมยกของขึ้นที่สูง"
+            alert_triggered = True
+
+        if alert_triggered:
+            final_msg = f"{alert_message}\nพื้นที่: คลองหนึ่ง, ปทุมธานี"
+        else:
+            final_msg = f"☁️ [พยากรณ์อากาศปกติ]\nพื้นที่: คลองหนึ่ง, ปทุมธานี\n"
+            final_msg += f"⏱️ 1 ชม. ข้างหน้า: {rain_1h:.1f} mm ({get_rain_intensity_label(rain_1h)})\n"
+            final_msg += f"⏱️ 3 ชม. ข้างหน้า: {rain_3h:.1f} mm ({get_rain_intensity_label(rain_3h)})\n"
+            final_msg += f"⏱️ 6 ชม. ข้างหน้า: {rain_6h:.1f} mm ({get_rain_intensity_label(rain_6h)})"
+
+        tz_bkk = timezone(timedelta(hours=7))
+        now = datetime.now(tz_bkk)
+        
+        is_schedule_time = now.hour in [7, 11, 16] and now.minute == 5
+        print(f"[DEBUG] now = {now}, schedule = {is_schedule_time}, alert = {alert_triggered}")
+        
+        if alert_triggered or is_schedule_time:
+            url = 'https://api.line.me/v2/bot/message/broadcast'
+            headers = {
+                'Authorization': f'Bearer {LINE_TOKEN}',
+                'Content-Type': 'application/json'
+            }
+            payload = json.dumps({"messages": [{"type": "text", "text": final_msg}]}).encode('utf-8')
+            try:
+                req = urllib.request.Request(url, data=payload, headers=headers, method='POST')
+                urllib.request.urlopen(req)
+            except:
+                pass
+
+        return {
+            "statusCode": 200,
+            "headers": cors_headers,
+            "body": json.dumps({
+                "status": "success",
+                "predictions": {"1h": rain_1h, "3h": rain_3h, "6h": rain_6h},
+                "soil_moisture": soil_pathum,
+                "alert_triggered": alert_triggered,
+                "alert_message": alert_message
+            })
+        }
+    except Exception as e:
+        return {
+            "statusCode": 500,
+            "headers": cors_headers,
+            "body": json.dumps({"status": "error", "message": str(e)})
+        }

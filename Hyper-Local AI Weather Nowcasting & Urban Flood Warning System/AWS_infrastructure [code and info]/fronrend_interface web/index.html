@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Khlong Nueng Live Flood Monitoring</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+<style>
+:root {
+    --bg-normal: linear-gradient(135deg, #1a1c3a 0%, #302b63 50%, #240b36 100%);
+    --bg-alert: linear-gradient(135deg, #240b36 0%, #b21f1f 50%, #ff4b2b 100%);
+    --glass-bg: rgba(255, 255, 255, 0.05);
+    --glass-border: rgba(255, 255, 255, 0.1);
+    --text-main: #ffffff;
+    --text-sub: #a8b2d1;
+    --color-safe: #2ecc71;
+    --color-warning: #fdbb2d;
+    --color-alert: #ff4757;
+}
+
+body {
+    background: var(--bg-normal);
+    color: var(--text-main);
+    font-family: 'Kanit', sans-serif;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+}
+
+.dashboard-container {
+    width: 90%;
+    max-width: 650px;
+    text-align: center;
+    position: relative; /* เพิ่มตรงนี้เพื่อให้ปุ่มภาษาอิงตำแหน่งกล่องนี้ */
+    padding-top: 30px;
+}
+
+/* ปุ่มสลับภาษา */
+.lang-toggle {
+    position: absolute;
+    top: -10px;
+    right: 0;
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    padding: 8px 15px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-sub);
+    transition: 0.3s;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.lang-toggle:hover {
+    background: rgba(255, 255, 255, 0.15);
+    color: var(--text-main);
+}
+
+.icon-container {
+    font-size: 80px;
+}
+
+h1 {
+    font-size: 2rem;
+    margin-bottom: 5px;
+}
+
+.location-tag {
+    color: var(--text-sub);
+}
+
+.status-badge {
+    padding: 10px 25px;
+    border-radius: 50px;
+    display: inline-block;
+    margin-top: 15px;
+    font-weight: 500;
+}
+
+.status-badge.safe {
+    background: rgba(46, 204, 113, 0.15);
+    color: var(--color-safe);
+}
+
+.status-badge.alert {
+    background: rgba(255, 71, 87, 0.15);
+    color: var(--color-alert);
+}
+
+.timeline-item {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    border-radius: 20px;
+    padding: 20px;
+    margin: 12px 0;
+    display: grid;
+    grid-template-columns: 100px 1fr auto;
+    align-items: center;
+}
+
+.value-label {
+    font-size: 1.8rem;
+    font-weight: bold;
+}
+
+.rain-label {
+    font-size: 0.9rem;
+    margin-top: 5px;
+}
+
+.status-icon {
+    font-size: 25px;
+}
+
+.footer {
+    margin-top: 20px;
+    color: var(--text-sub);
+}
+</style>
+</head>
+
+<body>
+
+<div class="dashboard-container">
+    
+    <div class="lang-toggle" onclick="toggleLanguage()" id="lang-btn">
+        🇹🇭 TH
+    </div>
+
+    <div class="icon-container" id="main-icon">☁️</div>
+
+    <h1>Khlong Nueng Live Flood Monitoring</h1>
+    <div class="location-tag" id="loc-tag">คลองหนึ่ง, ปทุมธานี</div>
+
+    <div id="status" class="status-badge safe">กำลังโหลด...</div>
+
+    <div class="timeline-item">
+        <div>
+            <div id="date1">--</div>
+            <div id="time1">--</div>
+        </div>
+        <div>
+            <div id="txt-1h">1 ชั่วโมงข้างหน้า</div>
+            <div><span id="p1" class="value-label">-</span> mm</div>
+            <div id="label1" class="rain-label">-</div>
+        </div>
+        <div id="ico1" class="status-icon">⚪</div>
+    </div>
+
+    <div class="timeline-item">
+        <div>
+            <div id="date3">--</div>
+            <div id="time3">--</div>
+        </div>
+        <div>
+            <div id="txt-3h">3 ชั่วโมงข้างหน้า</div>
+            <div><span id="p3" class="value-label">-</span> mm</div>
+            <div id="label3" class="rain-label">-</div>
+        </div>
+        <div id="ico3" class="status-icon">⚪</div>
+    </div>
+
+    <div class="timeline-item">
+        <div>
+            <div id="date6">--</div>
+            <div id="time6">--</div>
+        </div>
+        <div>
+            <div id="txt-6h">6 ชั่วโมงข้างหน้า</div>
+            <div><span id="p6" class="value-label">-</span> mm</div>
+            <div id="label6" class="rain-label">-</div>
+        </div>
+        <div id="ico6" class="status-icon">⚪</div>
+    </div>
+
+    <div class="footer">
+        <span id="txt-soil">Soil:</span> <span id="soil">-</span>
+    </div>
+
+</div>
+
+<script>
+const API_ENDPOINT = 'https://ih69cmicw2.execute-api.us-east-1.amazonaws.com/default/FloodPredictionFunction';
+const el = id => document.getElementById(id);
+
+// 1. ตั้งค่าระบบภาษา
+let currentLang = 'th';
+let latestData = null; // เก็บข้อมูลล่าสุดไว้ จะได้ไม่ต้องโหลด API ใหม่ตอนกดสลับภาษา
+
+const i18n = {
+    th: {
+        location: "คลองหนึ่ง, ปทุมธานี",
+        loading: "กำลังโหลด...",
+        safe: "✅ ปกติ",
+        error: "❌ โหลดข้อมูลไม่ได้",
+        alertFallback: "🚨 เสี่ยงน้ำท่วม!",
+        hr1: "1 ชั่วโมงข้างหน้า",
+        hr3: "3 ชั่วโมงข้างหน้า",
+        hr6: "6 ชั่วโมงข้างหน้า",
+        soil: "ความชื้นดิน (Soil): ",
+        rainLabels: ["ไม่มีฝน", "ฝนเล็กน้อย", "ฝนปรอยๆ", "ฝนปานกลาง", "ฝนตกหนัก"]
+    },
+    en: {
+        location: "Khlong Nueng, Pathum Thani",
+        loading: "Loading...",
+        safe: "✅ Normal",
+        error: "❌ Failed to load",
+        alertFallback: "🚨 Flood Warning!",
+        hr1: "Next 1 Hour",
+        hr3: "Next 3 Hours",
+        hr6: "Next 6 Hours",
+        soil: "Soil Moisture: ",
+        rainLabels: ["No Rain", "Light Rain", "Drizzle", "Moderate Rain", "Heavy Rain"]
+    }
+};
+
+// 2. ฟังก์ชันสลับภาษา
+function toggleLanguage() {
+    currentLang = currentLang === 'th' ? 'en' : 'th';
+    
+    // เปลี่ยนข้อความบนปุ่ม
+    el('lang-btn').innerHTML = currentLang === 'th' ? '🇹🇭 TH' : '🇬🇧 EN';
+    
+    // อัปเดต UI ทันทีถ้ามีข้อมูลแล้ว
+    if (latestData) {
+        renderUI();
+    }
+}
+
+function getRainLabel(rain_mm) {
+    const labels = i18n[currentLang].rainLabels;
+    if (rain_mm <= 0.4) return labels[0];
+    else if (rain_mm < 2.0) return labels[1];
+    else if (rain_mm < 6.0) return labels[2];
+    else if (rain_mm < 10.0) return labels[3];
+    else return labels[4];
+}
+
+function getRainColor(rain_mm) {
+    if (rain_mm <= 0.4) return "#a8b2d1";
+    else if (rain_mm < 6) return "#fdbb2d";
+    else return "#ff4757";
+}
+
+function getIcon(rain_mm) {
+    if (rain_mm <= 0.4) return "⚪";
+    else if (rain_mm < 6) return "💧";
+    else if (rain_mm < 10) return "🌧️";
+    else return "⛈️";
+}
+
+function formatTime(h) {
+    const d = new Date();
+    d.setHours(d.getHours() + h);
+    // สลับรูปแบบวันที่/เวลา ตามภาษาที่เลือก
+    const locale = currentLang === 'th' ? 'th-TH' : 'en-GB';
+    return {
+        date: d.toLocaleDateString(locale),
+        time: d.toLocaleTimeString(locale)
+    }
+}
+
+// 3. แยกฟังก์ชันวาดหน้าจอ (Render) ออกมา เพื่อให้เรียกซ้ำได้ตอนเปลี่ยนภาษา
+function renderUI() {
+    const data = latestData;
+    const t1 = formatTime(1);
+    const t3 = formatTime(3);
+    const text = i18n[currentLang];
+
+    // อัปเดตข้อความคงที่ต่างๆ
+    el('loc-tag').innerText = text.location;
+    el('txt-1h').innerText = text.hr1;
+    el('txt-3h').innerText = text.hr3;
+    el('txt-6h').innerText = text.hr6;
+    el('txt-soil').innerText = text.soil;
+
+    const r1 = data.predictions['1h'];
+    const r3 = data.predictions['3h'];
+    const r6 = data.predictions['6h'];
+
+    el('p1').innerText = r1.toFixed(1);
+    el('p3').innerText = r3.toFixed(1);
+    el('p6').innerText = r6.toFixed(1);
+
+    el('label1').innerText = getRainLabel(r1);
+    el('label3').innerText = getRainLabel(r3);
+    el('label6').innerText = getRainLabel(r6);
+
+    el('label1').style.color = getRainColor(r1);
+    el('label3').style.color = getRainColor(r3);
+    el('label6').style.color = getRainColor(r6);
+
+    el('ico1').innerText = getIcon(r1);
+    el('ico3').innerText = getIcon(r3);
+    el('ico6').innerText = getIcon(r6);
+
+    el('soil').innerText = data.soil_moisture.toFixed(3);
+
+    el('date1').innerText = t1.date;
+    el('time1').innerText = t1.time;
+    el('date3').innerText = t3.date;
+    el('time3').innerText = t3.time;
+    
+    const t6 = formatTime(6);
+    el('date6').innerText = t6.date;
+    el('time6').innerText = t6.time;
+
+    // จัดการ Status
+    if (data.alert_triggered) {
+        // ถ้าแจ้งเตือน มาจาก Lambda เป็นภาษาไทย ถ้าสลับเป็น Eng อาจจะใช้ Fallback แทน
+        let alertMsg = data.alert_message;
+        if (currentLang === 'en') {
+             // คุณสามารถเช็ค Tier แล้วแปลตรงนี้ได้ถ้าต้องการ แต่ตอนนี้ใช้ Fallback กลางๆ ไปก่อน
+             alertMsg = text.alertFallback; 
+        }
+        el('status').innerText = alertMsg;
+        el('status').className = "status-badge alert";
+    } else {
+        el('status').innerText = text.safe;
+        el('status').className = "status-badge safe";
+    }
+}
+
+async function update() {
+    el('status').innerText = i18n[currentLang].loading;
+    try {
+        const res = await fetch(API_ENDPOINT);
+        const data = await res.json();
+        
+        latestData = data; // บันทึกข้อมูลใส่ตัวแปร Global
+        renderUI(); // สั่งวาดหน้าจอ
+    } catch (e) {
+        console.error(e);
+        el('status').innerText = i18n[currentLang].error;
+        el('status').className = "status-badge alert";
+    }
+}
+
+update();
+setInterval(update, 300000);
+
+</script>
+
+</body>
+</html>

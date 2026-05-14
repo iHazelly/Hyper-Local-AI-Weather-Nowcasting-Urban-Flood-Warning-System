@@ -1,0 +1,135 @@
+import json
+import boto3
+import urllib3
+import math
+from datetime import datetime, timezone, timedelta
+from urllib3.util.retry import Retry
+
+# --- AWS CONFIGURATION ---
+S3_BUCKET_NAME = "flood-storage-st125894" 
+DYNAMODB_TABLE_NAME = "WeatherTelemetry"
+
+s3_client = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table(DYNAMODB_TABLE_NAME)
+
+# --- EXPONENTIAL BACKOFF CONFIGURATION ---
+retry_strategy = Retry(
+    total=3, 
+    backoff_factor=1, 
+    status_forcelist=[429, 500, 502, 503, 504]
+)
+http = urllib3.PoolManager(retries=retry_strategy)
+
+# --- SPATIAL NODES CONFIGURATION ---
+# Nodes: 0: Pathum (Target), 1: Ayu (North), 2: BKK (South), 3: Nak (East), 4: Non (West)
+LATS = "14.06,14.35,13.75,14.20,13.86"
+LONS = "100.61,100.57,100.50,101.21,100.51"
+
+API_URL = f"https://api.open-meteo.com/v1/forecast?latitude={LATS}&longitude={LONS}&current=temperature_2m,relative_humidity_2m,rain,surface_pressure,cloud_cover,wind_speed_10m,wind_direction_10m&hourly=soil_moisture_0_to_1cm,soil_moisture_1_to_3cm,soil_moisture_3_to_9cm&timezone=Asia/Bangkok&past_days=2&forecast_days=1"
+
+def transform_wind_vectors(wind_speed, wind_dir_degrees):
+    if wind_speed is None or wind_dir_degrees is None:
+        return 0.0, 0.0
+    theta_rad = math.radians(wind_dir_degrees)
+    wind_x = -wind_speed * math.sin(theta_rad)
+    wind_y = -wind_speed * math.cos(theta_rad)
+    return round(wind_x, 4), round(wind_y, 4)
+
+def lambda_handler(event, context):
+    try:
+        tz_bkk = timezone(timedelta(hours=7))
+        now_bkk = datetime.now(tz_bkk)
+        
+        aligned_now = now_bkk.replace(minute=0, second=0, microsecond=0)
+        timestamp_str = aligned_now.strftime('%Y-%m-%dT%H:%M:%S')
+        s3_key = f"raw_data/{aligned_now.year}/{aligned_now.month:02d}/{aligned_now.day:02d}/{aligned_now.strftime('%H0000')}_payload.json"
+
+        # 1. DATA INGESTION
+        response = http.request('GET', API_URL)
+        if response.status != 200:
+            raise Exception(f"External API Failure: Status {response.status}")
+        
+        raw_payload = json.loads(response.data.decode('utf-8'))
+
+        # 2. DUAL-WRITE (S3 Data Lake)
+        s3_client.put_object(
+            Bucket=S3_BUCKET_NAME,
+            Key=s3_key,
+            Body=json.dumps(raw_payload),
+            ContentType='application/json'
+        )
+
+        # 3. PREPROCESSING & SPATIAL INTERPOLATION
+        node_suffixes = ['pathum', 'ayu', 'bkk', 'nak', 'non']
+        feature_row = {'node_id': 'master_grid', 'timestamp': timestamp_str}
+
+        def get_current_metric(target_idx, metric_name):
+            val = raw_payload[target_idx].get('current', {}).get(metric_name)
+            if val is not None:
+                return val
+            valid_vals = [
+                raw_payload[j].get('current', {}).get(metric_name) 
+                for j in range(5) if j != target_idx and raw_payload[j].get('current', {}).get(metric_name) is not None
+            ]
+            return round(sum(valid_vals) / len(valid_vals), 4) if valid_vals else 0.0
+
+        for i, suffix in enumerate(node_suffixes):
+            temp = get_current_metric(i, 'temperature_2m')
+            rh = get_current_metric(i, 'relative_humidity_2m')
+            rain = get_current_metric(i, 'rain')
+            sp = get_current_metric(i, 'surface_pressure')
+            cc = get_current_metric(i, 'cloud_cover')
+            w_speed = get_current_metric(i, 'wind_speed_10m')
+            w_dir = get_current_metric(i, 'wind_direction_10m')
+            wind_x, wind_y = transform_wind_vectors(w_speed, w_dir)
+
+            feature_row[f"temperature_2m_{suffix}"] = str(temp)
+            feature_row[f"relative_humidity_2m_{suffix}"] = str(rh)
+            feature_row[f"rain_{suffix}"] = str(rain)
+            feature_row[f"surface_pressure_{suffix}"] = str(sp)
+            feature_row[f"cloud_cover_{suffix}"] = str(cc)
+            feature_row[f"wind_speed_10m_{suffix}"] = str(w_speed)
+            feature_row[f"wind_x_{suffix}"] = str(wind_x)
+            feature_row[f"wind_y_{suffix}"] = str(wind_y)
+
+            if suffix == 'pathum':
+                search_time_str = aligned_now.strftime('%Y-%m-%dT%H:00')
+                def get_soil_val(target_idx):
+                    hourly_data = raw_payload[target_idx].get('hourly', {})
+                    times = hourly_data.get('time', [])
+                    soil_0_1 = hourly_data.get('soil_moisture_0_to_1cm', [])
+                    soil_1_3 = hourly_data.get('soil_moisture_1_to_3cm', [])
+                    soil_3_9 = hourly_data.get('soil_moisture_3_to_9cm', [])
+                    
+                    best_val = None
+                    for i_time, t in enumerate(times):
+                        if t <= search_time_str:
+                            if i_time < len(soil_0_1) and i_time < len(soil_1_3) and i_time < len(soil_3_9):
+                                s1, s2, s3 = soil_0_1[i_time], soil_1_3[i_time], soil_3_9[i_time]
+                                if s1 is not None and s2 is not None and s3 is not None:
+                                    best_val = round((s1 + s2 + s3) / 3, 4)
+                        else:
+                            break
+                    return best_val
+
+                soil_val = get_soil_val(i)
+                if soil_val is None:
+                    valid_soils = [get_soil_val(j) for j in range(5) if j != i and get_soil_val(j) is not None]
+                    soil_val = round(sum(valid_soils) / len(valid_soils), 4) if valid_soils else 0.0
+                feature_row["soil_moisture"] = str(soil_val)
+
+        # 4. WRITE TO DYNAMODB
+        table.put_item(Item=feature_row)
+
+        return {
+            'statusCode': 200,
+            'body': json.dumps({'status': 'Success', 'node_id': 'master_grid', 'timestamp': timestamp_str})
+        }
+
+    except Exception as e:
+        print(f"CRITICAL ERROR in Flood_Data_Ingestion: {str(e)}")
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': str(e)})
+        }
