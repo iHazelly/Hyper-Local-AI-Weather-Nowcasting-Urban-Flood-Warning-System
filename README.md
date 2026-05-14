@@ -108,3 +108,16 @@ Open‑Meteo API – free historical and real‑time weather data
 AWS Learner Lab – cloud computing credits for academic projects
 
 Asian Institute of Technology (AIT) – faculty and staff support
+
+---
+## 📄 Citation
+
+If you use this code, architecture, or ideas from this project, please cite:
+
+```bibtex
+@misc{khanongsuwan_2026_flood,
+  title={Hyper-Local AI Weather Nowcasting \& Urban Flood Warning System: A Serverless MLOps Pipeline on AWS},
+  author={Khanongsuwan, Paradorn},
+  year={2026},
+  howpublished={\url{https://github.com/iHazelly/Hyper-Local-AI-Weather-Nowcasting-Urban-Flood-Warning-System}}
+}
