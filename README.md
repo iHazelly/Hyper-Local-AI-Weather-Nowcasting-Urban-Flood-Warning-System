@@ -1,4 +1,7 @@
+
+
 # Hyper-Local-AI-Weather-Nowcasting-Urban-Flood-Warning-System
+<img width="4901" height="2927" alt="image" src="https://github.com/user-attachments/assets/20fc2401-566f-4ca4-ad3f-3b37bea38dcb" />
 
 ## Data Engineering & MLOps Integration – From Raw API to Real‑Time Alert
 
