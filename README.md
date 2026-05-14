@@ -66,13 +66,7 @@ If you are a data engineer or ML engineer, studying this repository will show yo
 
 ---
 
-## Architecture
 
-![Architecture](docs/images/architecture.png)
-
-*Placeholder: Insert your architecture diagram (e.g., using draw.io). Show EventBridge → Lambda Ingestion → S3/DynamoDB → Lambda Prediction → API Gateway → Dashboard / LINE.*
-
----
 
 ## Key Features
 
