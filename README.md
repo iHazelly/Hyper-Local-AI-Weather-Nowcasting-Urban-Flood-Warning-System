@@ -87,13 +87,13 @@ If you are a data engineer or ML engineer, studying this repository will show yo
 ## AI Use Declaration
 During the development of this project, I used AI tools for:
 
-Language translation and sentence refinement
+- Language translation and sentence refinement
 
-Code suggestions, debugging, and structural guidance
+- Code suggestions, debugging, and structural guidance
 
-Writing assistance for the report and this README
+- Writing assistance for the report and this README
 
-Brainstorming and conceptual support
+- Brainstorming and conceptual support
 
 However, all core model design, data collection, feature engineering, result interpretation, and final technical decisions were made by the author (Paradorn Khanongsuwan). All AI‑generated outputs have been manually verified and adapted by the author.
 
@@ -103,11 +103,11 @@ This declaration follows the academic integrity guidelines of the Asian Institut
 
 
 ##  Acknowledgements
-Open‑Meteo API – free historical and real‑time weather data
+- **Open‑Meteo API** – free historical and real‑time weather data
 
-AWS Learner Lab – cloud computing credits for academic projects
+- **AWS Learner Lab** – cloud computing credits for academic projects
 
-Asian Institute of Technology (AIT) – faculty and staff support
+- **Asian Institute of Technology (AIT)** – faculty and staff support
 
 ---
 ## 📄 Citation
